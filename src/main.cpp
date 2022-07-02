@@ -7,8 +7,6 @@
 #include "soc/rtc_cntl_reg.h" // Disable brownour problems
 #include "driver/rtc_io.h"
 #include "stdlib.h"
-// #include <ESPAsyncWebServer.h>
-// #include <StringArray.h>
 #include <SPIFFS.h>
 #include <FS.h>
 #include <PubSubClient.h>
@@ -16,7 +14,6 @@
 #include "soc/rtc_cntl_reg.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
-
 #include "../include/secrets.h"
 
 // OV2640 camera module pins (CAMERA_MODEL_AI_THINKER)
@@ -50,13 +47,16 @@ PubSubClient client(wifiClient);
 
 boolean workInProgress = false;
 
+// To avoid sending extra messages
 boolean recievedResponse = true;
 short counter = 0;
 
+// Temperature ports
 const int oneWireBus = 14;
 OneWire oneWire(oneWireBus);
 DallasTemperature sensors(&oneWire);
 
+// Flashing ability 
 void flashOnForNSeconds(int seconds)
 {
 	digitalWrite(FLASH_GPIO_NUM, HIGH);
@@ -64,14 +64,15 @@ void flashOnForNSeconds(int seconds)
 	digitalWrite(FLASH_GPIO_NUM, LOW);
 }
 
-// Capture Photo and Save it to SPIFFS
-void capturePhotoSaveSpiffs(void)
+// Capture Photo and Temperature and send it over MQTT
+void capturePhotoAndTemp(void)
 {
     if (workInProgress == false)
     {
         workInProgress = true;
-        camera_fb_t *fb = NULL; // pointer
-
+        camera_fb_t *fb = NULL;
+		
+		// Get photo buffer
         fb = esp_camera_fb_get();
         if (!fb)
         {
@@ -81,12 +82,14 @@ void capturePhotoSaveSpiffs(void)
         }
 
         bool res = client.publish(PUBLISH_TOPIC, fb->buf, fb->len, false);
+		// If publishing photo succeeds
         if (res)
 		{
 			sensors.requestTemperatures(); 
   			int temperatureC = sensors.getTempCByIndex(0);
 			char temp[34];
 			sprintf(temp, "%d", temperatureC);
+			// Publish temperature
 			client.publish(PUBLISH_TOPIC, temp);
             Serial.println("[INFO] New message published");
 			recievedResponse = false;
@@ -98,6 +101,7 @@ void capturePhotoSaveSpiffs(void)
 			recievedResponse = true;
 		}
 
+		// Release frame buffer
         esp_camera_fb_return(fb);
         workInProgress = false;
     }
@@ -130,19 +134,9 @@ void initCamera()
 	config.pin_reset = RESET_GPIO_NUM;
 	config.xclk_freq_hz = 20000000;
 	config.pixel_format = PIXFORMAT_JPEG;
-
-	if (psramFound())
-	{
-		config.frame_size = FRAMESIZE_VGA;
-		config.jpeg_quality = 10;
-		config.fb_count = 1;
-	}
-	else
-	{
-		config.frame_size = FRAMESIZE_VGA;
-		config.jpeg_quality = 10;
-		config.fb_count = 1;
-	}
+	config.frame_size = FRAMESIZE_VGA;
+	config.jpeg_quality = 10;
+	config.fb_count = 1;
 
 	// Camera init
 	esp_err_t err = esp_camera_init(&config);
@@ -157,7 +151,6 @@ void initAndConnectWifi()
 {
 	// Connect to Wi-Fi
 	int startWifiTime = millis();
-	int connectAttemps = 0;
 	WiFi.begin(SSID, PASSWORD);
 	while (WiFi.status() != WL_CONNECTED)
 	{
@@ -165,14 +158,13 @@ void initAndConnectWifi()
 		Serial.println("[INFO] Connecting to Wi-Fi...");
 		Serial.println(secondsWaiting);
 		delay(1000);
-		connectAttemps++;
 	}
-
 	// Print ESP32 Local IP Address
 	Serial.print("[INFO] Connected to Wi-Fi: IP Address: http://");
 	Serial.println(WiFi.localIP());
 }
 
+// This function handles new messages from subscription
 void callback(char *topic, byte *payload, unsigned int length)
 {
 	recievedResponse = true;
@@ -185,14 +177,14 @@ void callback(char *topic, byte *payload, unsigned int length)
 	Serial.println();
 }
 
+// Connect to MQTT server
 void connect()
 {
 	if (!client.connected())
-	{
 		client.connect(CLIENT_ID, MQTT_USER, MQTT_PASS);
-	}
 }
 
+// Subscribe to topic
 void subscribe()
 {
 	client.subscribe(SUBSCRIBE_TOPIC);
@@ -204,6 +196,7 @@ void setup()
 	// Serial port for debugging purposes
 	Serial.begin(9600);
 	WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
 	// initialize digital pin ledPin as an output
 	pinMode(FLASH_GPIO_NUM, OUTPUT);
 
@@ -211,22 +204,28 @@ void setup()
 	initAndConnectWifi();
 	initCamera();
 
+	// MQTT start
 	client.setServer(BROKER, 1883);
 	connect();
 	subscribe();
 
-	client.setBufferSize(50 * 1024);
+	// client.setBufferSize(50 * 1024);
+
+	// Start temperature
 	sensors.begin();
 }
 
 void loop()
 {
+	// Connection may get lost while looping
 	while (!client.connected())
 		connect();
 
+	// If we have more than three messages without response
+	// don't send anything
 	if (recievedResponse || counter <= 3)
-		capturePhotoSaveSpiffs();
-		
+		capturePhotoAndTemp();
+
 	client.loop();
 	delay(3000);
 }

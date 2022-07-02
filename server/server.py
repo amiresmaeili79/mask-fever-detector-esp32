@@ -7,6 +7,7 @@ import cv2
 import paho.mqtt.client as mqtt
 
 from mask_detector import MaskDetector
+from db import DB
 
 MQTT_SERVER = "mosquitto.itsloop.dev"
 MQTT_TOPIC_IMAGE = "esp32/iust_image"
@@ -28,19 +29,24 @@ def on_message(client, userdata, msg):
     if len(msg.payload) <= 32:
         temperature = int(msg.payload)
 
-        if image_log['recieved']:
-            print(temperature)
+        if not image_log['recieved']:
+            return
 
-            if image_log["result"] is None:  # no face detected
-                 client.publish(MQTT_TOPIC_RESULT, "-1")
-            elif image_log["result"] and temperature < 37:  # mask detected and temperature is below 37
-                 client.publish(MQTT_TOPIC_RESULT, "1")
-            else:  # mask not detected or temperature is above 37
-                 client.publish(MQTT_TOPIC_RESULT, "0")
+        print(temperature)
 
-            print(f"[INFO] {datetime.now().time()} - Mask: {image_log['result']} | Temp: {temperature}")
+        if image_log["result"] is None:  # no face detected
+                client.publish(MQTT_TOPIC_RESULT, "-1")
+        elif image_log["result"] and temperature < 37:  # mask detected and temperature is below 37
+                client.publish(MQTT_TOPIC_RESULT, "1")
+        else:  # mask not detected or temperature is above 37
+                client.publish(MQTT_TOPIC_RESULT, "0")
 
-            image_log = {'recieved': False, 'result': None}
+        current_time = datetime.now()
+        print(f"[INFO] {current_time.time()} - Mask: {image_log['result']} | Temp: {temperature}")
+        
+        DB.add_new_record(current_time.timestamp(), image_log["file_name"], image_log["result"], temperature)
+
+        image_log = {'recieved': False, 'result': None, "file_name": None}
 
     else:
         now = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")

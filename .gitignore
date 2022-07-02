@@ -171,3 +171,5 @@ cython_debug/
 **/**/*.jpg
 server/img_tmp
 .vscode/
+server/*.db
+*.db
