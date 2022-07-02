@@ -209,7 +209,9 @@ void setup()
 	connect();
 	subscribe();
 
-	// client.setBufferSize(50 * 1024);
+	bool couldAlloc = client.setBufferSize(65535);
+	if (!couldAlloc)
+		Serial.println("[ERROR] Could not allocate buffer size");
 
 	// Start temperature
 	sensors.begin();
