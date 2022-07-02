@@ -70,5 +70,3 @@ class MaskDetector:
             (mask, withoutMask) = self.mask_detection_model.predict(face)[0]
             return mask > withoutMask
 
-
-mask_detector = MaskDetector("face_detection_model", "mask_detector.model")

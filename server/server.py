@@ -2,6 +2,7 @@ import imp
 import os
 from datetime import datetime
 from pathlib import Path
+from unittest import result
 
 import cv2
 import paho.mqtt.client as mqtt
@@ -15,6 +16,8 @@ MQTT_TOPIC_RESULT = "esp32/iust_out"
 
 IMAGE_TMP_DIR = Path("./img_tmp")
 
+image_log = {'recieved': False, 'result': None}
+
 
 def on_connect(client, userdata, flags, rc):
     print(f"[INFO] {datetime.now().time()} - Connectd to server")
@@ -22,20 +25,32 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message(client, userdata, msg):
-    now = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    name = IMAGE_TMP_DIR / f"image_{now}.jpg"
+    global image_log
+    temperature = 10;
+    if len(msg.payload) <= 32:
 
-    with open(name, "wb") as fd:
-        fd.write(msg.payload)
+        temperature = int(msg.payload)
+        if image_log['recieved']:
+            print(temperature)
+            published = client.publish(MQTT_TOPIC_RESULT, "1" if (image_log['result'] and temperature <= 32) else "0")
+            print(f"[INFO] {datetime.now().time()} - Mask detection result: {image_log['result']}")
+            image_log = {'recieved': False, 'result': None}
 
-    image = cv2.imread(name, -1)
-    if image is None:
-        return
+    else:
+        now = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        name = str(IMAGE_TMP_DIR / f"image_{now}.jpg")
 
-    res = mask_det.have_mask(image)
-    if res is not None:
-        client.publish(MQTT_TOPIC_RESULT, "1" if res else "0")
-        print(f"[INFO] {datetime.now().time()} - Mask detection result: {res}")
+        with open(name, "wb") as fd:
+            fd.write(msg.payload)
+
+        image = cv2.imread(name, -1)
+        if image is None:
+            return
+
+        res = mask_det.have_mask(image)
+        if res is not None:
+            image_log['recieved'] = True
+            image_log['result'] = res
 
 
 if __name__ == "__main__":

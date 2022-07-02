@@ -6,6 +6,7 @@
 #include "soc/soc.h"		  // Disable brownour problems
 #include "soc/rtc_cntl_reg.h" // Disable brownour problems
 #include "driver/rtc_io.h"
+#include "stdlib.h"
 // #include <ESPAsyncWebServer.h>
 // #include <StringArray.h>
 #include <SPIFFS.h>
@@ -55,6 +56,9 @@ boolean workInProgress = false;
 
 TaskHandle_t subTask, pubTask;
 
+boolean recievedResponse = true;
+short counter = 0;
+
 void flashOnForNSeconds(int seconds)
 {
 	digitalWrite(FLASH_GPIO_NUM, HIGH);
@@ -62,30 +66,60 @@ void flashOnForNSeconds(int seconds)
 	digitalWrite(FLASH_GPIO_NUM, LOW);
 }
 
+void intToByteArray(uint8_t *bytes, int bytes_len, int param)
+{
+    for (int i = 3; i >= 0; i--)
+    {
+        bytes[i] = (param >> (i * 8)) & 0xff;
+    }
+}
+
+void packData(uint8_t *data, uint8_t *temperature, int tempLen, uint8_t *photo, int photoLen)
+{
+	for (int i = 0; i < tempLen; i++)
+	{
+		data[i] = temperature[i];
+	}
+
+	for (int i = 0; i < photoLen; i++)
+	{
+		data[i] = photo[i];
+	}
+}
+
 // Capture Photo and Save it to SPIFFS
 void capturePhotoSaveSpiffs(void)
 {
-	if (workInProgress == false)
-	{
-		workInProgress = true;
-		camera_fb_t *fb = NULL; // pointer
-		fb = esp_camera_fb_get();
-		if (!fb)
+    if (workInProgress == false)
+    {
+        workInProgress = true;
+        camera_fb_t *fb = NULL; // pointer
+
+        fb = esp_camera_fb_get();
+        if (!fb)
+        {
+            Serial.println("Camera capture failed");
+            workInProgress = false;
+            return;
+        }
+
+        bool res = client.publish(PUBLISH_TOPIC, fb->buf, fb->len, false);
+        if (res)
 		{
-			Serial.println("Camera capture failed");
-			workInProgress = false;
-			return;
+			client.publish(PUBLISH_TOPIC, "21");
+            Serial.println("[INFO] New message published");
+			recievedResponse = false;
+			counter++;
+		}
+        else
+		{
+            Serial.println("[ERRRO] Failed to publish message");
+			recievedResponse = true;
 		}
 
-		bool res = client.publish(PUBLISH_TOPIC, fb->buf, fb->len, false);
-		if (res)
-			Serial.println("[INFO] New message published");
-		else
-			Serial.println("[ERRRO] Failed to publish message");
-
-		esp_camera_fb_return(fb);
-		workInProgress = false;
-	}
+        esp_camera_fb_return(fb);
+        workInProgress = false;
+    }
 }
 
 void initCamera()
@@ -118,14 +152,14 @@ void initCamera()
 
 	if (psramFound())
 	{
-		config.frame_size = FRAMESIZE_SVGA;
-		config.jpeg_quality = 20;
+		config.frame_size = FRAMESIZE_VGA;
+		config.jpeg_quality = 10;
 		config.fb_count = 1;
 	}
 	else
 	{
-		config.frame_size = FRAMESIZE_SVGA;
-		config.jpeg_quality = 20;
+		config.frame_size = FRAMESIZE_VGA;
+		config.jpeg_quality = 10;
 		config.fb_count = 1;
 	}
 
@@ -160,6 +194,8 @@ void initAndConnectWifi()
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
+	recievedResponse = true;
+	counter--;
 	Serial.printf("[INFO] Message #%d arrived - Has mask: ");
 	for (int i = 0; i < length; i++)
 	{
@@ -176,14 +212,14 @@ void connect()
 	}
 }
 
-void subscribe(void *)
+void subscribe()
 {
 	client.subscribe(SUBSCRIBE_TOPIC);
 	client.setCallback(callback);
-	for (;;)
-	{
-		client.loop();
-	}
+	// for (;;)
+	// {
+	// 	client.loop();
+	// }
 }
 
 void setup()
@@ -201,14 +237,15 @@ void setup()
 	client.setServer(BROKER, 1883);
 	connect();
 
-	xTaskCreatePinnedToCore(
-		subscribe,	 /* Function to implement the task */
-		"subscribe", /* Name of the task */
-		10000,		 /* Stack size in words */
-		NULL,		 /* Task input parameter */
-		0,			 /* Priority of the task */
-		&subTask,	 /* Task handle. */
-		1);			 /* Core where the task should run */
+	// xTaskCreatePinnedToCore(
+	// 	subscribe,	 /* Function to implement the task */
+	// 	"subscribe", /* Name of the task */
+	// 	10000,		 /* Stack size in words */
+	// 	NULL,		 /* Task input parameter */
+	// 	0,			 /* Priority of the task */
+	// 	&subTask,	 /* Task handle. */
+	// 	1);			 /* Core where the task should run */
+	subscribe();
 
 	client.setBufferSize(50 * 1024);
 }
@@ -219,7 +256,8 @@ void loop()
 	{
 		connect();
 	}
-	capturePhotoSaveSpiffs();
+	if (recievedResponse || counter <= 3)
+		capturePhotoSaveSpiffs();
 	client.loop();
-	delay(8000);
+	delay(3000);
 }
