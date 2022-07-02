@@ -50,8 +50,6 @@ PubSubClient client(wifiClient);
 
 boolean workInProgress = false;
 
-TaskHandle_t subTask;
-
 boolean recievedResponse = true;
 short counter = 0;
 
@@ -87,7 +85,6 @@ void capturePhotoSaveSpiffs(void)
 		{
 			sensors.requestTemperatures(); 
   			int temperatureC = sensors.getTempCByIndex(0);
-			Serial.println(temperatureC);
 			char temp[34];
 			sprintf(temp, "%d", temperatureC);
 			client.publish(PUBLISH_TOPIC, temp);
@@ -200,10 +197,6 @@ void subscribe()
 {
 	client.subscribe(SUBSCRIBE_TOPIC);
 	client.setCallback(callback);
-	// for (;;)
-	// {
-	// 	client.loop();
-	// }
 }
 
 void setup()
@@ -220,15 +213,6 @@ void setup()
 
 	client.setServer(BROKER, 1883);
 	connect();
-
-	// xTaskCreatePinnedToCore(
-	// 	subscribe,	 /* Function to implement the task */
-	// 	"subscribe", /* Name of the task */
-	// 	10000,		 /* Stack size in words */
-	// 	NULL,		 /* Task input parameter */
-	// 	0,			 /* Priority of the task */
-	// 	&subTask,	 /* Task handle. */
-	// 	1);			 /* Core where the task should run */
 	subscribe();
 
 	client.setBufferSize(50 * 1024);
@@ -238,11 +222,11 @@ void setup()
 void loop()
 {
 	while (!client.connected())
-	{
 		connect();
-	}
+
 	if (recievedResponse || counter <= 3)
 		capturePhotoSaveSpiffs();
+		
 	client.loop();
 	delay(3000);
 }

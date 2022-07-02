@@ -1,14 +1,12 @@
-import imp
 import os
 from datetime import datetime
 from pathlib import Path
-from unittest import result
+from secrets import MQTT_PASSWORD, MQTT_USER
 
 import cv2
 import paho.mqtt.client as mqtt
 
 from mask_detector import MaskDetector
-from secrets import MQTT_USER, MQTT_PASSWORD
 
 MQTT_SERVER = "mosquitto.itsloop.dev"
 MQTT_TOPIC_IMAGE = "esp32/iust_image"
@@ -16,7 +14,7 @@ MQTT_TOPIC_RESULT = "esp32/iust_out"
 
 IMAGE_TMP_DIR = Path("./img_tmp")
 
-image_log = {'recieved': False, 'result': None}
+image_log = {'recieved': False, 'result': None, "file_name": None}
 
 
 def on_connect(client, userdata, flags, rc):
@@ -26,14 +24,22 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     global image_log
-    temperature = 10;
-    if len(msg.payload) <= 32:
 
+    if len(msg.payload) <= 32:
         temperature = int(msg.payload)
+
         if image_log['recieved']:
             print(temperature)
-            published = client.publish(MQTT_TOPIC_RESULT, "1" if (image_log['result'] and temperature <= 32) else "0")
-            print(f"[INFO] {datetime.now().time()} - Mask detection result: {image_log['result']}")
+
+            if image_log["result"] is None:  # no face detected
+                 client.publish(MQTT_TOPIC_RESULT, "-1")
+            elif image_log["result"] and temperature < 37:  # mask detected and temperature is below 37
+                 client.publish(MQTT_TOPIC_RESULT, "1")
+            else:  # mask not detected or temperature is above 37
+                 client.publish(MQTT_TOPIC_RESULT, "0")
+
+            print(f"[INFO] {datetime.now().time()} - Mask: {image_log['result']} | Temp: {temperature}")
+
             image_log = {'recieved': False, 'result': None}
 
     else:
@@ -44,13 +50,15 @@ def on_message(client, userdata, msg):
             fd.write(msg.payload)
 
         image = cv2.imread(name, -1)
-        if image is None:
-            return
 
-        res = mask_det.have_mask(image)
-        if res is not None:
-            image_log['recieved'] = True
-            image_log['result'] = res
+        if image is None:
+            res = None
+        else:
+            res = mask_det.have_mask(image)
+
+        image_log['recieved'] = True
+        image_log['result'] = res
+        image_log["file_name"] = name
 
 
 if __name__ == "__main__":
