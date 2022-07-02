@@ -14,6 +14,8 @@
 #include <PubSubClient.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 #include "../include/secrets.h"
 
@@ -46,45 +48,22 @@ const char *PASSWORD = "A137915a";
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
-int idx = 1;
-
-const char *BROKER = "mosquitto.itsloop.dev";
-const char *PUBLISH_TOPIC = "esp32/iust_image";
-const char *SUBSCRIBE_TOPIC = "esp32/iust_out";
-
 boolean workInProgress = false;
 
-TaskHandle_t subTask, pubTask;
+TaskHandle_t subTask;
 
 boolean recievedResponse = true;
 short counter = 0;
+
+const int oneWireBus = 14;
+OneWire oneWire(oneWireBus);
+DallasTemperature sensors(&oneWire);
 
 void flashOnForNSeconds(int seconds)
 {
 	digitalWrite(FLASH_GPIO_NUM, HIGH);
 	delay(seconds * 1000);
 	digitalWrite(FLASH_GPIO_NUM, LOW);
-}
-
-void intToByteArray(uint8_t *bytes, int bytes_len, int param)
-{
-    for (int i = 3; i >= 0; i--)
-    {
-        bytes[i] = (param >> (i * 8)) & 0xff;
-    }
-}
-
-void packData(uint8_t *data, uint8_t *temperature, int tempLen, uint8_t *photo, int photoLen)
-{
-	for (int i = 0; i < tempLen; i++)
-	{
-		data[i] = temperature[i];
-	}
-
-	for (int i = 0; i < photoLen; i++)
-	{
-		data[i] = photo[i];
-	}
 }
 
 // Capture Photo and Save it to SPIFFS
@@ -106,7 +85,12 @@ void capturePhotoSaveSpiffs(void)
         bool res = client.publish(PUBLISH_TOPIC, fb->buf, fb->len, false);
         if (res)
 		{
-			client.publish(PUBLISH_TOPIC, "21");
+			sensors.requestTemperatures(); 
+  			int temperatureC = sensors.getTempCByIndex(0);
+			Serial.println(temperatureC);
+			char temp[34];
+			sprintf(temp, "%d", temperatureC);
+			client.publish(PUBLISH_TOPIC, temp);
             Serial.println("[INFO] New message published");
 			recievedResponse = false;
 			counter++;
@@ -248,6 +232,7 @@ void setup()
 	subscribe();
 
 	client.setBufferSize(50 * 1024);
+	sensors.begin();
 }
 
 void loop()
